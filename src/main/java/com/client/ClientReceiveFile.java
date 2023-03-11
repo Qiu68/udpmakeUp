@@ -2,10 +2,7 @@ package com.client;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetSocketAddress;
-import java.net.SocketException;
+import java.net.*;
 import java.util.Iterator;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -36,6 +33,8 @@ public class ClientReceiveFile {
     static byte[] receiveMsg = new byte[40 * 1024 + 4];
     //接收flag
     static boolean receiveFlag = true;
+    static int maxOrder = 1;
+    static int count = 1;
 
     static {
         try {
@@ -69,16 +68,8 @@ public class ClientReceiveFile {
         lastPacketId = Util.bytesToInt(data1);
         System.out.println("最后一个包的大小：" + data1.length + "内容：" + lastPacketId);
 
-        receive();
 
-
-    }
-
-
-    public static void receive() throws IOException {
-        int count = 1;
         datagramSocket.setReceiveBufferSize(1024 * 1024 * 300);
-        RandomAccessFile raf = new RandomAccessFile("d:/2/287m.h264", "rw");
 
         cmd = 1;
         cmdByte = Util.intToBytes(cmd);
@@ -88,74 +79,102 @@ public class ClientReceiveFile {
 
         //1000ms就将丢失队列的数据发送给服务端
         timeMillisCountTask();
-        long startReceiveTime = System.currentTimeMillis();
-        while (receiveFlag) {
-            if (System.currentTimeMillis() - startReceiveTime > 80000){
-                System.out.println("最后一个包没有收到");
-            }
-            datagramSocket.receive(receiveDatagramPacket);
-            int readLength = receiveDatagramPacket.getLength();
-            byte[] orderByte = new byte[4];
-            byte[] tmp = new byte[readLength];
-            tmp = receiveDatagramPacket.getData();
-            //获取数据包的顺序id
-            System.arraycopy(tmp, 0, orderByte, 0, 4);
-            //将顺序id转换成int
-            order = Util.bytesToInt(orderByte);
-            //将顺序id转换成int
-            System.out.println("order:" + order + "  接收数据:" + readLength + "  " +
-                    "接收到的次数:" + count++);
-
-            now_receive_packetId = order;
-            if (now_receive_packetId == 1) {
-                before_receive_packetId = 0;
-            }
-            //数据包顺序到达的情况
-            if (now_receive_packetId - before_receive_packetId == 1) {
-                byte[] data = new byte[readLength - orderByte.length];
-                //去掉顺序id的四个字节，然后将数据包内容写入文件
-                System.arraycopy(tmp, 4
-                        , data, 0, readLength - orderByte.length);
-                //移动到这个数据包写入文件的位置
-                raf.seek((order - 1) * 40960L);
-                //System.out.println("seek:"+(order-1) * data.length);
-                raf.write(data);
-            }
-
-            //丢包或者乱序的情况
-            else if (now_receive_packetId - before_receive_packetId > 1) {
-                for (int i = before_receive_packetId + 1; i < now_receive_packetId; i++) {
-                    //暂时加入丢失队列
+        try {
+            receive();
+        }
+        catch (SocketTimeoutException e){
+            System.out.println("超时");
+            System.out.println("maxOrder:"+maxOrder);
+            if (maxOrder < lastPacketId){
+                for (int i = maxOrder +1 ; i<=lastPacketId ;i++) {
                     loss_queue.add(i);
                 }
+                receive();
             }
-
-            if (now_receive_packetId < before_receive_packetId) {
-                //从丢失队列中移除
-                removeId(loss_queue, now_receive_packetId);
-                System.out.println("order:"+order + "seek:" + (order - 1) * 40960L);
-                RandomAccessFile raf2 = new RandomAccessFile("d:/2/287m.h264", "rw");
-                byte[] data = new byte[tmp.length - orderByte.length];
-                //去掉顺序id的四个字节，然后将数据包内容写入文件
-                System.arraycopy(tmp, 4
-                        , data, 0, tmp.length - orderByte.length);
-                //移动到这个数据包写入文件的位置
-                raf2.seek((order - 1) * 40960L);
-                raf2.write(data);
-                //这种情况不能更新上一个接收到的包
-                continue;
-            }
-
-            //更新before_receive_packetId
-            before_receive_packetId = now_receive_packetId;
-
-//            if (order == lastPacketId){
-//                System.out.println("文件接收完毕");
-//                receiveFlag = false;
-//            }
-
-
         }
+
+
+    }
+
+
+    public static void receive() throws IOException {
+        RandomAccessFile raf = new RandomAccessFile("d:/2/287m.h264", "rw");
+        long startReceiveTime = System.currentTimeMillis();
+        datagramSocket.setSoTimeout(3000);
+            while (receiveFlag) {
+                if (System.currentTimeMillis() - startReceiveTime > 80000) {
+                    System.out.println("最后一个包没有收到");
+
+                }
+                datagramSocket.receive(receiveDatagramPacket);
+                int readLength = receiveDatagramPacket.getLength();
+                byte[] orderByte = new byte[4];
+                byte[] tmp = new byte[readLength];
+                tmp = receiveDatagramPacket.getData();
+                //获取数据包的顺序id
+                System.arraycopy(tmp, 0, orderByte, 0, 4);
+                //将顺序id转换成int
+                order = Util.bytesToInt(orderByte);
+                //将顺序id转换成int
+                System.out.println("order:" + order + "  接收数据:" + readLength + "  " +
+                        "接收到的次数:" + count++);
+
+                if (maxOrder < order){
+                    maxOrder = order;
+                }
+                now_receive_packetId = order;
+                if (now_receive_packetId == 1) {
+                    before_receive_packetId = 0;
+                }
+                //数据包顺序到达的情况
+                if (now_receive_packetId - before_receive_packetId == 1) {
+                    byte[] data = new byte[readLength - orderByte.length];
+                    //去掉顺序id的四个字节，然后将数据包内容写入文件
+                    System.arraycopy(tmp, 4
+                            , data, 0, readLength - orderByte.length);
+                    //移动到这个数据包写入文件的位置
+                    raf.seek((order - 1) * 40960L);
+                    //System.out.println("seek:"+(order-1) * data.length);
+                    raf.write(data);
+                }
+
+                //丢包或者乱序的情况
+                else if (now_receive_packetId - before_receive_packetId > 1) {
+                    for (int i = before_receive_packetId + 1; i < now_receive_packetId; i++) {
+                        //暂时加入丢失队列
+                        loss_queue.add(i);
+                    }
+                }
+
+
+                if (order == lastPacketId){
+                    removeId(loss_queue,order);
+                }
+
+                if (now_receive_packetId < before_receive_packetId) {
+                    //从丢失队列中移除
+                    removeId(loss_queue, now_receive_packetId);
+                    System.out.println("order:" + order + "seek:" + (order - 1) * 40960L);
+                    RandomAccessFile raf2 = new RandomAccessFile("d:/2/287m.h264", "rw");
+                    byte[] data = new byte[tmp.length - orderByte.length];
+                    //去掉顺序id的四个字节，然后将数据包内容写入文件
+                    System.arraycopy(tmp, 4
+                            , data, 0, tmp.length - orderByte.length);
+                    //移动到这个数据包写入文件的位置
+                    raf2.seek((order - 1) * 40960L);
+                    raf2.write(data);
+                    //这种情况不能更新上一个接收到的包
+                    continue;
+                }
+
+
+
+                //更新before_receive_packetId
+                before_receive_packetId = now_receive_packetId;
+
+            }
+
+
     }
 
 

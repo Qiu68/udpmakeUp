@@ -140,11 +140,11 @@ public class CZServerHandler extends SimpleChannelInboundHandler<DatagramPacket>
                 throw new Exception("对象为空!");
             }
             System.out.println("准备重传");
-            sendTask.stopSend();
-            if (sendTask.getThread().isInterrupted()) {
+                sendTask.stopSend();
+                if (sendTask.getThread().isInterrupted()) {
+                    System.out.println("中断成功");
+                }
 
-                System.out.println("中断成功");
-            }
         }
 
         //将文件最后一个数据包字节数和序列号发送给客户端

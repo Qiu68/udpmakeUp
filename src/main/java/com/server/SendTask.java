@@ -9,6 +9,7 @@ import io.netty.util.internal.PlatformDependent;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.net.InetSocketAddress;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +32,8 @@ public class SendTask implements Runnable {
     public long fileLength;
     //是否发送
     private boolean sendFlag = true;
+    //文件是否发送完毕
+    private boolean sendComplete = false;
     //读文件的总次数
     private int readCount;
     //读取数据包计数
@@ -39,6 +42,7 @@ public class SendTask implements Runnable {
     private int eventPacketSize = 40 * 1024;
     private byte[] tmp = new byte[eventPacketSize];
     private RandomAccessFile raf;
+    private FileChannel fileChannel;
     private String clientIp;
     private Integer clientPort;
     private Channel channel;
@@ -59,6 +63,7 @@ public class SendTask implements Runnable {
 
     private void init() throws IOException {
         raf = new RandomAccessFile(file, "r");
+        fileChannel = raf.getChannel();
         fileLength = raf.length();
         thread = new Thread(this);
         //计算读文件的次数
@@ -74,21 +79,10 @@ public class SendTask implements Runnable {
     @Override
     public void run() {
         if (retransByte != null && retransByte.length > 0){
-
-            try {
-                retransmitTask(retransByte);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            retransmitTask(retransByte);
         }
         else {
-            try {
                 send();
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
         }
     }
 
@@ -101,7 +95,7 @@ public class SendTask implements Runnable {
     }
 
     //发送文件
-    public void send() throws IOException, InterruptedException {
+    public void send(){
 
         while (sendFlag) {
             int order = count;
@@ -111,7 +105,11 @@ public class SendTask implements Runnable {
                     retransmitTask(retransByte);
                 }
                 else {
-                    System.out.println("退出1");
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                     continue;
                 }
             }
@@ -124,7 +122,11 @@ public class SendTask implements Runnable {
             }
             ByteBuf buf = ByteBufAllocator.DEFAULT.buffer(1, 42 * 1024);
             int length = 0;
-            raf.seek((count-1)*40960L);
+            try {
+                raf.seek((count-1)*40960L);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             try {
                 length = raf.read(tmp);
             } catch (IOException e) {
@@ -138,6 +140,11 @@ public class SendTask implements Runnable {
                 //直接退出
                 else {
                     System.out.println("退出2");
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                     continue;
                 }
             }
@@ -181,7 +188,7 @@ public class SendTask implements Runnable {
         System.out.println("文件发送完毕");
     }
 
-    public void retransmitTask(byte[] bytes) throws InterruptedException {
+    public void retransmitTask(byte[] bytes)  {
         byte[] lossPackets = bytes.clone();
         //暂停发送
         System.out.println("开始重传！");
@@ -236,8 +243,13 @@ public class SendTask implements Runnable {
                         "  字节数:" + dataPacket.length);
                 System.out.println(order + "  seek:" + (lossPacketId - 1) * 40960L);
             }
-//            Thread.sleep(200);
             retransByte = null;
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                return;
+            }
+
             //继续发送文件
         return;
         } catch (IOException e) {
